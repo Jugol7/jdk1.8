@@ -153,14 +153,17 @@ public class FutureTask<V> implements RunnableFuture<V> {
         this.state = NEW;       // ensure visibility of callable
     }
 
+    @Override
     public boolean isCancelled() {
         return state >= CANCELLED;
     }
 
+    @Override
     public boolean isDone() {
         return state != NEW;
     }
 
+    @Override
     public boolean cancel(boolean mayInterruptIfRunning) {
         if (!(state == NEW &&
               UNSAFE.compareAndSwapInt(this, stateOffset, NEW,
@@ -185,6 +188,7 @@ public class FutureTask<V> implements RunnableFuture<V> {
     /**
      * @throws CancellationException {@inheritDoc}
      */
+    @Override
     public V get() throws InterruptedException, ExecutionException {
         int s = state;
         if (s <= COMPLETING)
@@ -195,6 +199,7 @@ public class FutureTask<V> implements RunnableFuture<V> {
     /**
      * @throws CancellationException {@inheritDoc}
      */
+    @Override
     public V get(long timeout, TimeUnit unit)
         throws InterruptedException, ExecutionException, TimeoutException {
         if (unit == null)
@@ -252,6 +257,7 @@ public class FutureTask<V> implements RunnableFuture<V> {
         }
     }
 
+    @Override
     public void run() {
         if (state != NEW ||
             !UNSAFE.compareAndSwapObject(this, runnerOffset,

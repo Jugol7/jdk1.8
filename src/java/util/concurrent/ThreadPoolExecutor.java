@@ -378,6 +378,12 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
      * that workerCount is 0 (which sometimes entails a recheck -- see
      * below).
      */
+    /**
+     * 记录线程池的生命周期状态和当前工作的线程数。
+     * 整型变量按二进制位分成两部分，分别表示两个信息
+     * runState (线程池生命周期状态)和 workerCount (工作线程数) 也将同时具有原子性。
+     * 参考博客：https://www.cnblogs.com/moonfair/p/13477974.html
+     */
     private final AtomicInteger ctl = new AtomicInteger(ctlOf(RUNNING, 0));
     private static final int COUNT_BITS = Integer.SIZE - 3;
     private static final int CAPACITY   = (1 << COUNT_BITS) - 1;
@@ -445,6 +451,13 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
      * return null even if it may later return non-null when delays
      * expire.
      */
+    /**
+     * 阻塞队列：final Object[] items;
+     * 其中不同的实现，表现方式不同
+     * 其次不同的方法的处理方式也不同
+     * ex：offer()：超出队列长度，直接返回false
+     *     put()：会阻塞，直到能入队列
+     */
     private final BlockingQueue<Runnable> workQueue;
 
     /**
@@ -509,10 +522,17 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
      * will likely be enough memory available for the cleanup code to
      * complete without encountering yet another OutOfMemoryError.
      */
+    /**
+     * 拒绝策略，默认为抛出异常
+     * 可自定义拒绝策略
+     */
     private volatile ThreadFactory threadFactory;
 
     /**
      * Handler called when saturated or shutdown in execute.
+     */
+    /**
+     * 核心线程数
      */
     private volatile RejectedExecutionHandler handler;
 
@@ -522,12 +542,18 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
      * present or if allowCoreThreadTimeOut. Otherwise they wait
      * forever for new work.
      */
+    /**
+     * 可存活时间
+     */
     private volatile long keepAliveTime;
 
     /**
      * If false (default), core threads stay alive even when idle.
      * If true, core threads use keepAliveTime to time out waiting
      * for work.
+     */
+    /**
+     * 设置为true，超出存活时间可回收核心线程数
      */
     private volatile boolean allowCoreThreadTimeOut;
 
@@ -536,16 +562,26 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
      * (and not allow to time out etc) unless allowCoreThreadTimeOut
      * is set, in which case the minimum is zero.
      */
+    /**
+     * 核心线程数
+     */
     private volatile int corePoolSize;
 
     /**
      * Maximum pool size. Note that the actual maximum is internally
      * bounded by CAPACITY.
      */
+    /**
+     * 最大线程数
+     */
     private volatile int maximumPoolSize;
 
     /**
      * The default rejected execution handler
+     */
+    /**
+     * 拒绝策略，默认为抛出异常
+     * 可自定义拒绝策略
      */
     private static final RejectedExecutionHandler defaultHandler =
         new AbortPolicy();
@@ -620,6 +656,7 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
         }
 
         /** Delegates main run loop to outer runWorker  */
+        @Override
         public void run() {
             runWorker(this);
         }
@@ -629,10 +666,12 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
         // The value 0 represents the unlocked state.
         // The value 1 represents the locked state.
 
+        @Override
         protected boolean isHeldExclusively() {
             return getState() != 0;
         }
 
+        @Override
         protected boolean tryAcquire(int unused) {
             if (compareAndSetState(0, 1)) {
                 setExclusiveOwnerThread(Thread.currentThread());
@@ -641,6 +680,7 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
             return false;
         }
 
+        @Override
         protected boolean tryRelease(int unused) {
             setExclusiveOwnerThread(null);
             setState(0);
@@ -1339,6 +1379,7 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
      *         cannot be accepted for execution
      * @throws NullPointerException if {@code command} is null
      */
+    @Override
     public void execute(Runnable command) {
         if (command == null)
             throw new NullPointerException();
@@ -1390,6 +1431,7 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
      *
      * @throws SecurityException {@inheritDoc}
      */
+    @Override
     public void shutdown() {
         final ReentrantLock mainLock = this.mainLock;
         mainLock.lock();
@@ -1421,6 +1463,7 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
      *
      * @throws SecurityException {@inheritDoc}
      */
+    @Override
     public List<Runnable> shutdownNow() {
         List<Runnable> tasks;
         final ReentrantLock mainLock = this.mainLock;
@@ -1437,6 +1480,7 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
         return tasks;
     }
 
+    @Override
     public boolean isShutdown() {
         return ! isRunning(ctl.get());
     }
@@ -1457,10 +1501,12 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
         return ! isRunning(c) && runStateLessThan(c, TERMINATED);
     }
 
+    @Override
     public boolean isTerminated() {
         return runStateAtLeast(ctl.get(), TERMINATED);
     }
 
+    @Override
     public boolean awaitTermination(long timeout, TimeUnit unit)
         throws InterruptedException {
         long nanos = unit.toNanos(timeout);
@@ -1483,6 +1529,7 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
      * Invokes {@code shutdown} when this executor is no longer
      * referenced and it has no threads.
      */
+    @Override
     protected void finalize() {
         SecurityManager sm = System.getSecurityManager();
         if (sm == null || acc == null) {
@@ -1908,6 +1955,7 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
      *
      * @return a string identifying this pool, as well as its state
      */
+    @Override
     public String toString() {
         long ncompleted;
         int nworkers, nactive;
@@ -2033,6 +2081,7 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
          * @param r the runnable task requested to be executed
          * @param e the executor attempting to execute this task
          */
+        @Override
         public void rejectedExecution(Runnable r, ThreadPoolExecutor e) {
             if (!e.isShutdown()) {
                 r.run();
@@ -2057,6 +2106,7 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
          * @param e the executor attempting to execute this task
          * @throws RejectedExecutionException always
          */
+        @Override
         public void rejectedExecution(Runnable r, ThreadPoolExecutor e) {
             throw new RejectedExecutionException("Task " + r.toString() +
                                                  " rejected from " +
@@ -2080,6 +2130,7 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
          * @param r the runnable task requested to be executed
          * @param e the executor attempting to execute this task
          */
+        @Override
         public void rejectedExecution(Runnable r, ThreadPoolExecutor e) {
         }
     }
@@ -2104,6 +2155,7 @@ public class ThreadPoolExecutor extends AbstractExecutorService {
          * @param r the runnable task requested to be executed
          * @param e the executor attempting to execute this task
          */
+        @Override
         public void rejectedExecution(Runnable r, ThreadPoolExecutor e) {
             if (!e.isShutdown()) {
                 e.getQueue().poll();
