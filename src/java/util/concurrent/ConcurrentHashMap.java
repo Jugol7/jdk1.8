@@ -1,33 +1,6 @@
 /*
  * ORACLE PROPRIETARY/CONFIDENTIAL. Use is subject to license terms.
  *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- */
-
-/*
- *
- *
- *
- *
- *
  * Written by Doug Lea with assistance from members of JCP JSR-166
  * Expert Group and released to the public domain, as explained at
  * http://creativecommons.org/publicdomain/zero/1.0/
@@ -682,6 +655,14 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      * never be used in index calculations because of table bounds.
      */
     static final int spread(int h) {
+        // 将key的hashCode值的高低16位进行^运算，最终又与HASH_BITS进行了&运算
+        // 将高位的hash也参与到计算索引位置的运算当中
+        // 为什么HashMap、ConcurrentHashMap，都要求数组长度为2^n
+        //  HASH_BITS让hash值的最高位符号位肯定为0，代表当前hash值默认情况下一定是正数，因为hash值为负数时意思如下：
+        // static final int MOVED = -1; // 代表当前hash位置的数据正在扩容！
+        // static final int TREEBIN = -2; // 代表当前hash位置下挂载的是一个红黑树
+        // static final int RESERVED = -3; // 预留当前索引位置……
+        // 计算索引位置时：tabAt(tab, i = (n - 1) & hash)；n：数组长度
         return (h ^ (h >>> 16)) & HASH_BITS;
     }
 
@@ -1003,49 +984,77 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      * @throws NullPointerException if the specified key or value is null
      */
     public V put(K key, V value) {
+        // 在调用put方法时，会调用putVal，第三个参数默认传递为false
+        // 在调用 putIfAbsent 时，会调用putVal方法，第三个参数传递的为true
+        // 如果传递为false，代表key一致时，直接覆盖数据
+        // 如果传递为true，代表key一致时，什么都不做，key不存在，正常添加（Redis，setnx）
         return putVal(key, value, false);
     }
 
     /** Implementation for put and putIfAbsent */
     final V putVal(K key, V value, boolean onlyIfAbsent) {
+        // 不允许 key/value 为null，HashMap 允许存在一个key==null，多个value==null
         if (key == null || value == null) throw new NullPointerException();
+        // 根据key的hashCode 计算一个hash值，后期得出当前key-value要存储在哪个数组索引位置
         int hash = spread(key.hashCode());
+        // 标识，后面有用！！！
         int binCount = 0;
+        // 将table赋值给局部变量tab
         for (Node<K,V>[] tab = table;;) {
             Node<K,V> f; int n, i, fh;
+            // 如果tab为null 或者数组的长度==0
             if (tab == null || (n = tab.length) == 0)
+                // 初始化数组
                 tab = initTable();
+            // 基于 n-1 & hash 计算索引位置  &效率高
+            // 并且获取该位置的值
             else if ((f = tabAt(tab, i = (n - 1) & hash)) == null) {
+                // 该位置没有值，通过CAS的方式将数据放在i位置上
                 if (casTabAt(tab, i, null,
                              new Node<K,V>(hash, key, value, null)))
                     break;                   // no lock when adding to empty bin
             }
+            // 当前位置是否正在 扩容
             else if ((fh = f.hash) == MOVED)
+                // 协助扩容
                 tab = helpTransfer(tab, f);
             else {
                 V oldVal = null;
+                // 只有当出现hash冲突时，才需要 synchronized 加锁
+                // 基于当前索引位置的Node，作为锁对象，细化锁
                 synchronized (f) {
+                    // 判断当前位置的数据还是之前的f么……（避免并发操作的安全问题）
                     if (tabAt(tab, i) == f) {
+                        // hash是否大于 0（不是树）
                         if (fh >= 0) {
+                            // 记录链表长度的一个标识
                             binCount = 1;
+                            // ++binCount
                             for (Node<K,V> e = f;; ++binCount) {
                                 K ek;
+                                // 当前索引位置的 hash是否与要插入的hash一致
                                 if (e.hash == hash &&
+                                        // key一致 可能需要覆盖数据
                                     ((ek = e.key) == key ||
                                      (ek != null && key.equals(ek)))) {
+                                    // 当前i索引位置数据的value复制给oldVal，用于返回
                                     oldVal = e.val;
+                                    // 如果传入的false 那么覆盖
                                     if (!onlyIfAbsent)
                                         e.val = value;
                                     break;
                                 }
+                                // 如果不一致
                                 Node<K,V> pred = e;
                                 if ((e = e.next) == null) {
+                                    // 封装成 Node 挂在当前节点的next
                                     pred.next = new Node<K,V>(hash, key,
                                                               value, null);
                                     break;
                                 }
                             }
                         }
+                        // 树化
                         else if (f instanceof TreeBin) {
                             Node<K,V> p;
                             binCount = 2;
@@ -1059,9 +1068,11 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
                     }
                 }
                 if (binCount != 0) {
+                    // 链表长度大于 8，尝试树化
                     if (binCount >= TREEIFY_THRESHOLD)
                         treeifyBin(tab, i);
                     if (oldVal != null)
+                        // 返回之前的被覆盖值
                         return oldVal;
                     break;
                 }
@@ -2219,19 +2230,34 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
 
     /**
      * Initializes table, using the size recorded in sizeCtl.
+     * sizeCtl：是数组在初始化和扩容操作时的一个控制变量
+     * -1：代表当前数组正在初始化
+     * 小于-1：低16位代表当前数组正在扩容的线程个数（如果1个线程
+     * 0：代表数组还没初始化
+     * 大于0：代表当前数组的扩容阈值，或者是当前数组的初始化大小
+     * 两次这样的 (tab = table) == null || tab.length == 0
+     * 单例模式中的 DCL
      */
     private final Node<K,V>[] initTable() {
         Node<K,V>[] tab; int sc;
+        // 判断当前数组是否已经初始化完毕
         while ((tab = table) == null || tab.length == 0) {
             if ((sc = sizeCtl) < 0)
                 Thread.yield(); // lost initialization race; just spin
+            // sizeCtl >= 0 可以尝试初始化数组，CAS的方式修改为 -1
             else if (U.compareAndSwapInt(this, SIZECTL, sc, -1)) {
                 try {
+                    // 成功代表，当前线程可以进行初始化操作
+                    // 再次判断当前数组是否已经初始化完毕
                     if ((tab = table) == null || tab.length == 0) {
+                        // 初始化数组的长度
                         int n = (sc > 0) ? sc : DEFAULT_CAPACITY;
                         @SuppressWarnings("unchecked")
+                        // 初始化数组
                         Node<K,V>[] nt = (Node<K,V>[])new Node<?,?>[n];
+                        // 赋值
                         table = tab = nt;
+                        // 将sc赋值为下次扩容的阈值 16 - 4 = 12
                         sc = n - (n >>> 2);
                     }
                 } finally {
@@ -2610,6 +2636,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      */
     private final void treeifyBin(Node<K,V>[] tab, int index) {
         Node<K,V> b; int n, sc;
+        // 数组长度大于64 树化，否则扩大数组长度
         if (tab != null) {
             if ((n = tab.length) < MIN_TREEIFY_CAPACITY)
                 tryPresize(n << 1);
