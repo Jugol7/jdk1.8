@@ -2346,10 +2346,14 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      * @param size number of elements (doesn't need to be perfectly accurate)
      */
     private final void tryPresize(int size) {
+        // 入参size是将之前的数组长度 左移 1位得到的结果
+        // size 最大值就去最大值，否则要保证 2的n次幂
         int c = (size >= (MAXIMUM_CAPACITY >>> 1)) ? MAXIMUM_CAPACITY :
             tableSizeFor(size + (size >>> 1) + 1);
         int sc;
+        // sizeCtl数组的状态
         while ((sc = sizeCtl) >= 0) {
+            // 以下代码解析可参照 initTable()
             Node<K,V>[] tab = table; int n;
             if (tab == null || (n = tab.length) == 0) {
                 n = (sc > c) ? sc : c;
@@ -2366,6 +2370,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
                     }
                 }
             }
+            // 计算出的长度达到最大值，或者小于等于 sc
             else if (c <= sc || n >= MAXIMUM_CAPACITY)
                 break;
             else if (tab == table) {
@@ -2392,8 +2397,10 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      */
     private final void transfer(Node<K,V>[] tab, Node<K,V>[] nextTab) {
         int n = tab.length, stride;
+        // 1. 计算每个线程迁移的长度
         if ((stride = (NCPU > 1) ? (n >>> 3) / NCPU : n) < MIN_TRANSFER_STRIDE)
             stride = MIN_TRANSFER_STRIDE; // subdivide range
+        // 2. 构建新数组并查看标识属性
         if (nextTab == null) {            // initiating
             try {
                 @SuppressWarnings("unchecked")
@@ -2633,6 +2640,17 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
     /**
      * Replaces all linked nodes in bin at given index unless table is
      * too small, in which case resizes instead.
+     * 红黑树是一种特殊的平衡二叉树，首选具备了平衡二叉树的特点：左子树和右子数的高度差不会超过1，
+     * 如果超过了，平衡二叉树就会基于左旋和右旋的操作，实现自平衡。
+     * 几个特性：
+     * 1. 每个节点必须是红色或者黑色。
+     * 2. 根节点必须是黑色。
+     * 3. 所有叶子节点都是黑色。
+     * 4. 如果当前节点是红色，子节点必须是黑色。
+     * 5. 从任意节点到每个叶子节点的路径中，黑色节点的数量是相同的。
+     * 基于以上特性，对于红黑树的的添加或者删除，会影响其结构，破坏平衡
+     * 所以需要通过左旋、右旋、变色来保持
+     *
      */
     private final void treeifyBin(Node<K,V>[] tab, int index) {
         Node<K,V> b; int n, sc;
@@ -2640,11 +2658,15 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
         if (tab != null) {
             if ((n = tab.length) < MIN_TREEIFY_CAPACITY)
                 tryPresize(n << 1);
+            // 数据校验，桶内有数据且为链表
             else if ((b = tabAt(tab, index)) != null && b.hash >= 0) {
                 synchronized (b) {
+                    // 再次校验，DCl机制
                     if (tabAt(tab, index) == b) {
+                        // hd是一个双链表。且节点类型为 TreeNode
                         TreeNode<K,V> hd = null, tl = null;
                         for (Node<K,V> e = b; e != null; e = e.next) {
+                            // 遍历链表，将Node封装TreeNode
                             TreeNode<K,V> p =
                                 new TreeNode<K,V>(e.hash, e.key, e.val,
                                                   null, null);
@@ -2654,6 +2676,8 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
                                 tl.next = p;
                             tl = p;
                         }
+                        // TreeBin 的有参构造，转为红黑树
+                        // 将 node数组的指向 红黑树
                         setTabAt(tab, index, new TreeBin<K,V>(hd));
                     }
                 }
@@ -2771,30 +2795,40 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
 
         /**
          * Creates bin with initial set of nodes headed by b.
+         * TreeBin中不但保存了红黑树结构，同时还保存在一套双向链表
          */
         TreeBin(TreeNode<K,V> b) {
             super(TREEBIN, null, null, null);
+            // 头节点
             this.first = b;
+            // 树根节点
             TreeNode<K,V> r = null;
             for (TreeNode<K,V> x = b, next; x != null; x = next) {
                 next = (TreeNode<K,V>)x.next;
+                // 左右节点清理
                 x.left = x.right = null;
+                // 树根节点==null，第一次遍历
                 if (r == null) {
+                    // 无父节点
                     x.parent = null;
+                    // 根节点是黑色
                     x.red = false;
                     r = x;
                 }
                 else {
+                    // 当前链表的key及hash
                     K k = x.key;
                     int h = x.hash;
                     Class<?> kc = null;
                     for (TreeNode<K,V> p = r;;) {
                         int dir, ph;
                         K pk = p.key;
+                        // dir：如果为-1，代表要插入到父节点的左边，如果为1，代表要插入的父节点的右边
                         if ((ph = p.hash) > h)
                             dir = -1;
                         else if (ph < h)
                             dir = 1;
+                        // 如果相等，基于compare方式判断到底放在左子树还是右子树
                         else if ((kc == null &&
                                   (kc = comparableClassFor(k)) == null) ||
                                  (dir = compareComparables(kc, k, pk)) == 0)
@@ -2806,6 +2840,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
                                 xp.left = x;
                             else
                                 xp.right = x;
+                            // 插入节点后，平衡处理
                             r = balanceInsertion(r, x);
                             break;
                         }
