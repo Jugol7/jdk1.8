@@ -94,10 +94,15 @@ public class CopyOnWriteArrayList<E>
     implements List<E>, RandomAccess, Cloneable, java.io.Serializable {
     private static final long serialVersionUID = 8673264195747942595L;
 
-    /** The lock protecting all mutators */
+    /** The lock protecting all mutators
+     * 在写数据时需要获取锁，全局唯一
+     */
     final transient ReentrantLock lock = new ReentrantLock();
 
-    /** The array, accessed only via getArray/setArray. */
+    /** The array, accessed only via getArray/setArray.
+     * 存储数据的数组
+     * 查询的时候时使用此数组
+     */
     private transient volatile Object[] array;
 
     /**
@@ -385,6 +390,7 @@ public class CopyOnWriteArrayList<E>
 
     @SuppressWarnings("unchecked")
     private E get(Object[] a, int index) {
+        // 数组上指定索引位置的值
         return (E) a[index];
     }
 
@@ -394,6 +400,7 @@ public class CopyOnWriteArrayList<E>
      * @throws IndexOutOfBoundsException {@inheritDoc}
      */
     public E get(int index) {
+        // getArray 拿到array数组，调用get方法的重载
         return get(getArray(), index);
     }
 
@@ -413,6 +420,7 @@ public class CopyOnWriteArrayList<E>
             if (oldValue != element) {
                 int len = elements.length;
                 Object[] newElements = Arrays.copyOf(elements, len);
+                // 直接覆盖
                 newElements[index] = element;
                 setArray(newElements);
             } else {
@@ -432,16 +440,21 @@ public class CopyOnWriteArrayList<E>
      * @return {@code true} (as specified by {@link Collection#add})
      */
     public boolean add(E e) {
+        // 基于lock锁，且这把锁时全局的
         final ReentrantLock lock = this.lock;
         lock.lock();
         try {
+            // 获取原数组
             Object[] elements = getArray();
             int len = elements.length;
+            // 基于原数组复制一份副本数组，并且长度比原来多了一个
             Object[] newElements = Arrays.copyOf(elements, len + 1);
             newElements[len] = e;
+            // 将新数组赋值给原数组
             setArray(newElements);
             return true;
         } finally {
+            // 记得释放
             lock.unlock();
         }
     }
@@ -454,25 +467,34 @@ public class CopyOnWriteArrayList<E>
      * @throws IndexOutOfBoundsException {@inheritDoc}
      */
     public void add(int index, E element) {
+        // 写入元素，指定索引位置。（不会覆盖数据）
+        // 基于lock锁，且这把锁时全局的
         final ReentrantLock lock = this.lock;
         lock.lock();
         try {
+            // 获取原数组
             Object[] elements = getArray();
             int len = elements.length;
+            // 如果索引位置>原数组的长度或者小于0
             if (index > len || index < 0)
                 throw new IndexOutOfBoundsException("Index: "+index+
                                                     ", Size: "+len);
             Object[] newElements;
             int numMoved = len - index;
             if (numMoved == 0)
+                // 如果numMoved为0，说明数据要放到最后面的位置
                 newElements = Arrays.copyOf(elements, len + 1);
             else {
+                // 原数组长度 + 1
                 newElements = new Object[len + 1];
+                // 两段赋值，留出针对要插入的位置，
                 System.arraycopy(elements, 0, newElements, 0, index);
                 System.arraycopy(elements, index, newElements, index + 1,
                                  numMoved);
             }
+            // 放入指定位置
             newElements[index] = element;
+            // 将新数组赋值给原数组
             setArray(newElements);
         } finally {
             lock.unlock();
@@ -490,15 +512,22 @@ public class CopyOnWriteArrayList<E>
         final ReentrantLock lock = this.lock;
         lock.lock();
         try {
+            // 获取原数组
             Object[] elements = getArray();
             int len = elements.length;
+            // 获取要删除的元素
             E oldValue = get(elements, index);
+            // 药移除的元素索引
             int numMoved = len - index - 1;
             if (numMoved == 0)
+                // 说明删除的元素是最后的位置
                 setArray(Arrays.copyOf(elements, len - 1));
             else {
+                // 声明数组的长度 -1
                 Object[] newElements = new Object[len - 1];
+                // 从0开始复制的index前面
                 System.arraycopy(elements, 0, newElements, 0, index);
+                // 从index后面复制到最后
                 System.arraycopy(elements, index + 1, newElements, index,
                                  numMoved);
                 setArray(newElements);
@@ -524,6 +553,7 @@ public class CopyOnWriteArrayList<E>
      */
     public boolean remove(Object o) {
         Object[] snapshot = getArray();
+        // 查找对应索引位置
         int index = indexOf(o, snapshot, 0, snapshot.length);
         return (index < 0) ? false : remove(o, snapshot, index);
     }
@@ -533,27 +563,39 @@ public class CopyOnWriteArrayList<E>
      * recent snapshot contains o at the given index.
      */
     private boolean remove(Object o, Object[] snapshot, int index) {
+        // 此时获取锁并加锁
         final ReentrantLock lock = this.lock;
         lock.lock();
         try {
+            // 获取原数组及长度
             Object[] current = getArray();
             int len = current.length;
             if (snapshot != current) findIndex: {
+                // 进来了说明数组发生了变化，之前的索引位置不一定对
                 int prefix = Math.min(index, len);
+                // 为何不在获取元素索引位置时就加锁？
                 for (int i = 0; i < prefix; i++) {
+                    // 通过传进来先前的数组与此时获取的数组比较
+                    // 同样位置相等，且等于要移除的值，那么这个索引就是数组变化要删除的索引
                     if (current[i] != snapshot[i] && eq(o, current[i])) {
                         index = i;
                         break findIndex;
                     }
                 }
+                // 来到这，说明没找到
                 if (index >= len)
                     return false;
+                // 当前位置是否是同一个
+                // 为何不在前面处理？
                 if (current[index] == o)
                     break findIndex;
+                // 查询在当前数组的索引位置
                 index = indexOf(o, current, index, len);
+                // 可能被删除了
                 if (index < 0)
                     return false;
             }
+            // 跟删除套路一样
             Object[] newElements = new Object[len - 1];
             System.arraycopy(current, 0, newElements, 0, index);
             System.arraycopy(current, index + 1,
@@ -799,6 +841,7 @@ public class CopyOnWriteArrayList<E>
         final ReentrantLock lock = this.lock;
         lock.lock();
         try {
+            // 重新构造数组为空
             setArray(new Object[0]);
         } finally {
             lock.unlock();
@@ -1132,6 +1175,11 @@ public class CopyOnWriteArrayList<E>
             (getArray(), Spliterator.IMMUTABLE | Spliterator.ORDERED);
     }
 
+    /**
+     * 即便用了迭代器也不让做写操作
+     * 不让在迭代时做写操作是因为不希望迭代操作时，会影响到写操作，还有，不希望迭代时，还需要加锁
+     * @param <E>
+     */
     static final class COWIterator<E> implements ListIterator<E> {
         /** Snapshot of the array */
         private final Object[] snapshot;
