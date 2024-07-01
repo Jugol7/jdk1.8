@@ -511,6 +511,9 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
     private static final float LOAD_FACTOR = 0.75f;
 
     /**
+     * 是8的原因
+     * 布松分布
+     *
      * The bin count threshold for using a tree rather than list for a
      * bin.  Bins are converted to trees when adding an element to a
      * bin with at least this many nodes. The value must be greater
@@ -654,10 +657,23 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      * to incorporate impact of the highest bits that would otherwise
      * never be used in index calculations because of table bounds.
      */
+    /**
+     * 1、HashMap 的⻓度为什么是 2 的幂次方？？？？？
+     * 让 HashMap 存取高效，较少碰撞，数据分配均匀。
+     * Hash 值的范围值-2147483648 到 2147483647，前后加起来大概 40 亿的映射空间，
+     * 只要哈希函数映射得比较均匀松散，一般应用是很难出现碰撞的。但问题是一个 40 亿⻓度的数组，内存是放不下，
+     * 所以这个散列值是不能直接拿来用的。用之前还要先做对数组的⻓度取模运算，得到的余数才能用来要存放的位置，
+     * 也就是对应的数组下标。这个数组下标的计算方法是“ (n - 1) & hash ”。（n 代表数组⻓度）。
+     * 这也就解释了 HashMap 的⻓度为什么是 2 的幂次方。
+     * 2、这个算法应该如何设计呢？？？？
+     * 我们首先可能会想到采用%取余的操作来实现。但是，重点来了：“取余(%)操作中如果除数是 2 的幂次
+     * 则等价于与其除数减一的与(&)操作（也就是说 hash%lengthFGhash&(length-1)的前提是 length 是 2
+     * 的 n 次方；）。” 并且 采用二进制位操作 &，相对于%能够提高运算效率，这就解释了 HashMap 的⻓
+     * 度为什么是 2 的幂次方
+     */
     static final int spread(int h) {
         // 将key的hashCode值的高低16位进行^运算，最终又与HASH_BITS进行了&运算
         // 将高位的hash也参与到计算索引位置的运算当中
-        // 为什么HashMap、ConcurrentHashMap，都要求数组长度为2^n
         //  HASH_BITS让hash值的最高位符号位肯定为0，代表当前hash值默认情况下一定是正数，因为hash值为负数时意思如下：
         // static final int MOVED = -1; // 代表当前hash位置的数据正在扩容！
         // static final int TREEBIN = -2; // 代表当前hash位置下挂载的是一个红黑树
@@ -911,24 +927,39 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      * {@code null}.  (There can be at most one such mapping.)
      *
      * @throws NullPointerException if the specified key is null
+     *
+     * 在查询数据时，
+     * 先判断当前key对应的value，是否在数组上。
+     * 其次会判断当前位置是否属于特殊情况：数据被迁移、位置被占用、红黑树结构
+     * 最后判断链表上是否有对应的数据。
+     * 找到返回指定的value，找不到返回null即可
      */
     public V get(Object key) {
         Node<K,V>[] tab; Node<K,V> e, p; int n, eh; K ek;
+        // 计算哈希值
         int h = spread(key.hashCode());
+        // 数组不是null，长度>0，拿到数组上的数据
         if ((tab = table) != null && (n = tab.length) > 0 &&
             (e = tabAt(tab, (n - 1) & h)) != null) {
             if ((eh = e.hash) == h) {
+                // key一致，则返回
                 if ((ek = e.key) == key || (ek != null && key.equals(ek)))
                     return e.val;
             }
             else if (eh < 0)
+                // 还是查找的 Node数组
+                // 查找的数据hash < 0 情况如下：
+                // 1、数据迁移走了；2、节点位置被占；3、红黑树
                 return (p = e.find(h, key)) != null ? p.val : null;
+            // 链表
             while ((e = e.next) != null) {
+                // hash一致 并且 key一致
                 if (e.hash == h &&
                     ((ek = e.key) == key || (ek != null && key.equals(ek))))
                     return e.val;
             }
         }
+        // 无数据
         return null;
     }
 
@@ -1651,6 +1682,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      * @throws RuntimeException or Error if the mappingFunction does so,
      *         in which case the mapping is left unestablished
      */
+    // key不能存在，基于函数计算new
     public V computeIfAbsent(K key, Function<? super K, ? extends V> mappingFunction) {
         if (key == null || mappingFunction == null)
             throw new NullPointerException();
@@ -1752,6 +1784,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      * @throws RuntimeException or Error if the remappingFunction does so,
      *         in which case the mapping is unchanged
      */
+    // key必须存在，基于old以及函数计算new
     public V computeIfPresent(K key, BiFunction<? super K, ? super V, ? extends V> remappingFunction) {
         if (key == null || remappingFunction == null)
             throw new NullPointerException();
@@ -1842,6 +1875,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      * @throws RuntimeException or Error if the remappingFunction does so,
      *         in which case the mapping is unchanged
      */
+    // 如果key存在，基于old以及函数计算new
     public V compute(K key,
                      BiFunction<? super K, ? super V, ? extends V> remappingFunction) {
         if (key == null || remappingFunction == null)
@@ -2232,7 +2266,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      * Initializes table, using the size recorded in sizeCtl.
      * sizeCtl：是数组在初始化和扩容操作时的一个控制变量
      * -1：代表当前数组正在初始化
-     * 小于-1：低16位代表当前数组正在扩容的线程个数（如果1个线程
+     * 小于-1：低16位代表当前数组正在扩容的线程个数（如果1个线程，值=-2；2个线程，值=-3
      * 0：代表数组还没初始化
      * 大于0：代表当前数组的扩容阈值，或者是当前数组的初始化大小
      * 两次这样的 (tab = table) == null || tab.length == 0
@@ -2243,12 +2277,13 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
         // 判断当前数组是否已经初始化完毕
         while ((tab = table) == null || tab.length == 0) {
             if ((sc = sizeCtl) < 0)
+                // 线程让步，先等一手，有其他线程在初始化
                 Thread.yield(); // lost initialization race; just spin
             // sizeCtl >= 0 可以尝试初始化数组，CAS的方式修改为 -1
             else if (U.compareAndSwapInt(this, SIZECTL, sc, -1)) {
                 try {
-                    // 成功代表，当前线程可以进行初始化操作
-                    // 再次判断当前数组是否已经初始化完毕
+                    // 成功，代表当前线程可以进行初始化操作
+                    // 再次判断当前数组是否已经初始化完毕  DCL设计
                     if ((tab = table) == null || tab.length == 0) {
                         // 初始化数组的长度
                         int n = (sc > 0) ? sc : DEFAULT_CAPACITY;
@@ -2261,6 +2296,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
                         sc = n - (n >>> 2);
                     }
                 } finally {
+                    // 赋值给 全局变量，下次要用的
                     sizeCtl = sc;
                 }
                 break;
@@ -2654,7 +2690,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      */
     private final void treeifyBin(Node<K,V>[] tab, int index) {
         Node<K,V> b; int n, sc;
-        // 数组长度大于64 树化，否则扩大数组长度
+        // 数组长度大于64则树化，否则扩大数组长度
         if (tab != null) {
             if ((n = tab.length) < MIN_TREEIFY_CAPACITY)
                 tryPresize(n << 1);
