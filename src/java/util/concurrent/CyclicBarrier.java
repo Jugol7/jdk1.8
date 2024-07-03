@@ -136,6 +136,22 @@ import java.util.concurrent.locks.ReentrantLock;
  *
  * @author Doug Lea
  */
+
+/**
+ * CyclicBarrier对比CountDownLatch区别
+ * 底层实现不同。CyclicBarrier基于ReentrantLock做的。CountDownLatch直接基于AQS做
+ * 的。
+ * 应用场景不同。CountDownLatch的计数器只能使用一次。而CyclicBarrier在计数器达到0之
+ * 后，可以重置计数器。CyclicBarrier可以实现相比CountDownLatch更复杂的业务，执行业务
+ * 时出现了错误，可以重置CyclicBarrier计数器，再次执行一次。
+ * CyclicBarrier还提供了很多其他的功能：
+ * 可以获取到阻塞的现成有多少
+ * 在线程互相等待时，如果有等待的线程中断，可以抛出异常，避免无限等待的问题。
+ * CountDownLatch一般是让主线程等待，让子线程对计数器--。CyclicBarrier更多的让子线程
+ * 也一起计数和等待，等待的线程达到数值后，再统一唤醒
+ * CyclicBarrier：多个线程互相等待，直到到达同一个同步点，再一次执行。
+ *
+ */
 public class CyclicBarrier {
     /**
      * Each use of the barrier is represented as a generation instance.
@@ -147,16 +163,24 @@ public class CyclicBarrier {
      * and all the rest are either broken or tripped.
      * There need not be an active generation if there has been a break
      * but no subsequent reset.
+     * 用来标记是否中断
      */
     private static class Generation {
         boolean broken = false;
     }
 
     /** The lock for guarding barrier entry */
+    /**
+     * 在后续jdk版本使用 synchronized
+     * 官方解释是：在使用 synchronized 与 ReentrantLock 都能解决的时候，偏向于使用 synchronized
+     */
     private final ReentrantLock lock = new ReentrantLock();
     /** Condition to wait on until tripped */
     private final Condition trip = lock.newCondition();
     /** The number of parties */
+    /**
+     * 屏障线程的个数
+     */
     private final int parties;
     /* The command to run when tripped */
     private final Runnable barrierCommand;
@@ -187,8 +211,10 @@ public class CyclicBarrier {
      * Called only while holding lock.
      */
     private void breakBarrier() {
+        // 中断标志更新
         generation.broken = true;
         count = parties;
+        // 唤醒线程
         trip.signalAll();
     }
 
@@ -198,19 +224,23 @@ public class CyclicBarrier {
     private int dowait(boolean timed, long nanos)
         throws InterruptedException, BrokenBarrierException,
                TimeoutException {
+        // 操作 final 局部变量
         final ReentrantLock lock = this.lock;
         lock.lock();
         try {
+            // 中断标志
             final Generation g = generation;
 
             if (g.broken)
                 throw new BrokenBarrierException();
 
+            // 线程是否中断
             if (Thread.interrupted()) {
                 breakBarrier();
                 throw new InterruptedException();
             }
 
+            // 先赋值 在--
             int index = --count;
             if (index == 0) {  // tripped
                 boolean ranAction = false;
@@ -219,6 +249,7 @@ public class CyclicBarrier {
                     if (command != null)
                         command.run();
                     ranAction = true;
+                    // 代表没有需要等待的线程，全部唤醒处理
                     nextGeneration();
                     return 0;
                 } finally {
@@ -258,6 +289,7 @@ public class CyclicBarrier {
                 }
             }
         } finally {
+            // 解析资源
             lock.unlock();
         }
     }
@@ -276,7 +308,9 @@ public class CyclicBarrier {
      */
     public CyclicBarrier(int parties, Runnable barrierAction) {
         if (parties <= 0) throw new IllegalArgumentException();
+        // 记录需要屏障的线程数
         this.parties = parties;
+        // 用来 --
         this.count = parties;
         this.barrierCommand = barrierAction;
     }
@@ -358,6 +392,7 @@ public class CyclicBarrier {
      *         action (if present) failed due to an exception
      */
     public int await() throws InterruptedException, BrokenBarrierException {
+        // 线程要死等，直屏障点数值为0，或者有线程中断
         try {
             return dowait(false, 0L);
         } catch (TimeoutException toe) {
@@ -432,6 +467,7 @@ public class CyclicBarrier {
         throws InterruptedException,
                BrokenBarrierException,
                TimeoutException {
+        // 传入等待的时间，要么时间到位了，要不就是直屏障点数值为0，或者有线程中断
         return dowait(true, unit.toNanos(timeout));
     }
 

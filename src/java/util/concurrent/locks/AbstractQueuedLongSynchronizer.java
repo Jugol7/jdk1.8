@@ -464,6 +464,7 @@ public abstract class AbstractQueuedLongSynchronizer
                 if (ws == Node.SIGNAL) {
                     if (!compareAndSetWaitStatus(h, Node.SIGNAL, 0))
                         continue;            // loop to recheck cases
+                    // 唤醒线程
                     unparkSuccessor(h);
                 }
                 else if (ws == 0 &&
@@ -771,6 +772,7 @@ public abstract class AbstractQueuedLongSynchronizer
                         return;
                     }
                 }
+                // 挂起线程
                 if (shouldParkAfterFailedAcquire(p, node) &&
                     parkAndCheckInterrupt())
                     throw new InterruptedException();
@@ -1076,9 +1078,11 @@ public abstract class AbstractQueuedLongSynchronizer
      */
     public final void acquireSharedInterruptibly(long arg)
             throws InterruptedException {
+        // 线程是否中断
         if (Thread.interrupted())
             throw new InterruptedException();
         if (tryAcquireShared(arg) < 0)
+            // 挂起
             doAcquireSharedInterruptibly(arg);
     }
 
@@ -1116,6 +1120,7 @@ public abstract class AbstractQueuedLongSynchronizer
      * @return the value returned from {@link #tryReleaseShared}
      */
     public final boolean releaseShared(long arg) {
+        // -1 之后是否==0，如果是的
         if (tryReleaseShared(arg)) {
             doReleaseShared();
             return true;
@@ -1460,7 +1465,9 @@ public abstract class AbstractQueuedLongSynchronizer
          */
         Node p = enq(node);
         int ws = p.waitStatus;
+        // 修改状态成功
         if (ws > 0 || !compareAndSetWaitStatus(p, ws, Node.SIGNAL))
+            // 唤醒线程
             LockSupport.unpark(node.thread);
         return true;
     }
@@ -1663,6 +1670,7 @@ public abstract class AbstractQueuedLongSynchronizer
         private void doSignalAll(Node first) {
             lastWaiter = firstWaiter = null;
             do {
+                // Node链表循环处理线程
                 Node next = first.nextWaiter;
                 first.nextWaiter = null;
                 transferForSignal(first);
@@ -1732,6 +1740,7 @@ public abstract class AbstractQueuedLongSynchronizer
         public final void signalAll() {
             if (!isHeldExclusively())
                 throw new IllegalMonitorStateException();
+            // 第一个节点
             Node first = firstWaiter;
             if (first != null)
                 doSignalAll(first);

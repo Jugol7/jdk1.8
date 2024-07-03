@@ -1,33 +1,6 @@
 /*
  * ORACLE PROPRIETARY/CONFIDENTIAL. Use is subject to license terms.
  *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- *
- */
-
-/*
- *
- *
- *
- *
- *
  * Written by Doug Lea with assistance from members of JCP JSR-166
  * Expert Group and released to the public domain, as explained at
  * http://creativecommons.org/publicdomain/zero/1.0/
@@ -170,6 +143,7 @@ public class CountDownLatch {
         }
 
         protected int tryAcquireShared(int acquires) {
+            // state 是否为0
             return (getState() == 0) ? 1 : -1;
         }
 
@@ -179,6 +153,7 @@ public class CountDownLatch {
                 int c = getState();
                 if (c == 0)
                     return false;
+                // 计算器-1
                 int nextc = c-1;
                 if (compareAndSetState(c, nextc))
                     return nextc == 0;
@@ -288,6 +263,7 @@ public class CountDownLatch {
      * <p>If the current count equals zero then nothing happens.
      */
     public void countDown() {
+        // 计数器-1
         sync.releaseShared(1);
     }
 
